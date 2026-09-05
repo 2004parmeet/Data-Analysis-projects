@@ -1,0 +1,262 @@
+-- ---------------------------------------------------------------------------------------------------------------------------------------------------------------------
+-- Customer Analysis 
+-- ---------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+-- 1. Who are our top 10 customers by revenue,
+
+with cte as
+(select c.customername , o.customernumber , sum(o2.quantityordered * o2.priceeach) revenue
+from orders o
+join orderdetails o2
+on o.ordernumber = o2.ordernumber 
+join customers c 
+on o.customernumber = c.customernumber
+group by c.customername , o.customernumber),
+
+top_10 as(
+select * from cte order by revenue desc
+limit 10)
+select * from top_10;
+
+-- 2. Which customers have never placed an order despite being in our system? (dormant/dead accounts)
+
+select c.customernumber , c.customername from customers c 
+left join orders o
+on c.customernumber = o.customernumber 
+where o.ordernumber is null;
+
+-- 3. How are customers distributed by country, and where is our revenue concentrated geographically?
+
+select c.country ,count(c.customernumber) from customers c
+left join orders o 
+on c.customernumber = o.customernumber 
+group by c.country;
+
+select c.country ,sum(o2.quantityordered * o2.priceeach) revenue
+from orders o
+join orderdetails o2
+on o.ordernumber = o2.ordernumber 
+join customers c 
+on o.customernumber = c.customernumber
+group by c.country
+order by revenue desc ;
+
+-- 4. Which customers are above the average credit limit 
+
+select customername ,creditlimit from customers 
+where creditlimit >
+(select avg(creditlimit) from customers);
+
+-- ---------------------------------------------------------------------------------------------------------------------------------------------------------------------
+-- Sales Performance
+-- ---------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+-- 5. What does our monthly/yearly revenue trend look like — are we growing or declining
+
+select year(o.orderdate),month(o.orderdate) ,sum(o2.quantityordered * o2.priceeach) as revenue 
+from orders o
+join orderdetails o2
+on o.ordernumber = o2.ordernumber
+group by year(o.orderdate),month(o.orderdate);
+
+select year(o.orderdate) ,sum(o2.quantityordered * o2.priceeach) as revenue 
+from orders o
+join orderdetails o2
+on o.ordernumber = o2.ordernumber
+group by year(o.orderdate)
+order by year(o.orderdate);
+
+-- 6. Which product line generates the highest total revenue, and which is the weakest?
+
+-- highest 
+select p.productline ,sum(o.quantityordered * o.priceeach) revenue from orderdetails o
+left join products p
+on o.productcode = p.productcode
+group by p.productline
+order by revenue desc 
+limit 1 ;
+
+-- weakest
+select p.productline ,sum(o.quantityordered * o.priceeach) revenue from orderdetails o
+left join products p
+on o.productcode = p.productcode
+group by p.productline
+order by revenue asc 
+limit 1 ;
+ 
+-- 7. What is our average order value, and how does it vary by customer or region?
+
+select avg(revenue) from (
+select o.ordernumber ,sum(o2.quantityordered * o2.priceeach) revenue
+from orders o
+join orderdetails o2
+on o.ordernumber = o2.ordernumber
+group by o.ordernumber) t;
+
+select country ,avg(revenue) from (
+select o.ordernumber ,o.customernumber ,sum(o2.quantityordered * o2.priceeach) revenue
+from orders o
+join orderdetails o2
+on o.ordernumber = o2.ordernumber
+group by o.ordernumber) t
+JOIN customers c
+on t.customernumber = c.customernumber
+group by c.country ;
+
+-- 8. Which orders were shipped late (after the required date), and is late shipping concentrated with specific customers or products?
+
+SELECT  o.orderNumber , c.customername ,c.customernumber
+from orders o
+left join customers c
+on o.customernumber = c.customernumber
+where shippeddate > requireddate;
+
+select o.orderNumber ,p.productname from orders o
+join orderdetails o2
+on o.ordernumber = o2.ordernumber 
+join products p
+on p.productcode = o2.productcode
+where o.shippeddate > o.requireddate;
+-- ---------------------------------------------------------------------------------------------------------------------------------------------------------------------
+-- Product Analysis
+-- ---------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+-- 9. What are our top 5 best-selling products by quantity, and top 5 by revenue?
+
+select p.productname ,sum(o.quantityordered) quantity from orderdetails o
+join products p 
+on p.productcode = o.productcode 
+group by p.productname
+order by quantity desc
+limit 5;
+
+select p.productname ,sum(o.quantityordered * o.priceeach) price from orderdetails o
+join products p 
+on p.productcode = o.productcode 
+group by p.productname
+order by price desc
+limit 5;
+
+-- 10. Which products have never been ordered — are we carrying dead inventory 
+
+select p.productname ,p.quantityinstock from products p
+left join orderdetails o
+on p.productcode = o.productcode
+where ordernumber is null;
+
+-- 11. What is the best-selling product within each product line (identifying category leaders)?
+
+select * from (
+select p.productname , p.productline , sum(o.quantityordered) total_quantity,
+dense_rank() over(partition by productline order by sum(o.quantityordered) desc) as rnk 
+from products p
+join orderdetails o
+on p.productcode = o.productcode
+group by p.productname , p.productline)t
+where rnk=1;
+
+-- 12. How does average buy price and profit margin ((MSRP−buyPrice)/MSRP) vary across product lines?
+
+select productline , avg(buyprice),
+avg((msrp - buyprice)/msrp )*100 as profit_margin 
+from products 
+group by productline 
+order by profit_margin desc ;
+
+-- ----------------------------------------------------------------------------------------------------------------------------------------------------------------------
+-- Customer Value & Ranking
+-- ----------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+-- 13. Rank all customers by total sales 
+
+select c.customername , o.customernumber , sum(o2.quantityordered * o2.priceeach) sales ,
+dense_rank() over(order by sum(o2.quantityordered * o2.priceeach) desc) rnk
+from orders o
+join orderdetails o2
+on o.ordernumber = o2.ordernumber 
+join customers c 
+on o.customernumber = c.customernumber
+group by c.customername , o.customernumber ;
+
+-- 14. Who are the top 3 customers in each city/state — useful for regional account management.
+
+-- city
+select * from (
+select c.customername , c.city , sum(o2.quantityordered * o2.priceeach) sales ,
+row_number() over(partition by c.city order by sum(o2.quantityordered * o2.priceeach) desc) rnk
+from orders o
+join orderdetails o2
+on o.ordernumber = o2.ordernumber 
+join customers c 
+on o.customernumber = c.customernumber
+group by c.customername , c.city ) t
+where rnk <= 3;
+
+-- state
+select * from (
+select c.customername , c.state , sum(o2.quantityordered * o2.priceeach) sales ,
+row_number() over(partition by c.state order by sum(o2.quantityordered * o2.priceeach) desc) rnk
+from orders o
+join orderdetails o2
+on o.ordernumber = o2.ordernumber 
+join customers c 
+on o.customernumber = c.customernumber
+group by c.customername , c.state ) t
+where rnk <= 3;
+
+-- 15. Which customers placed more than 3 orders — are they candidates for a loyalty program?
+
+select customernumber, count(ordernumber) as order_count
+from orders
+group by customernumber
+having count(ordernumber) > 3;
+
+-- ---------------------------------------------------------------------------------------------------------------------------------------------------------------------
+-- Employee/Sales Rep Performance 
+-- ---------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+-- 16. Which sales reps manage the highest-revenue customers? 
+
+select c.salesrepemployeenumber ,e.firstname ,sum(o2.quantityordered * o2.priceeach) total_sales
+from orders o
+join orderdetails o2
+on o.ordernumber = o2.ordernumber 
+join customers c 
+on o.customernumber = c.customernumber
+join employees e
+on c.salesrepemployeenumber = e.employeenumber
+group by c.salesrepemployeenumber ,e.firstname 
+order by sum(o2.quantityordered * o2.priceeach) desc;
+
+-- 17. How is the customer base distributed across sales reps — is workload balanced?
+
+select c.salesrepemployeenumber ,e.firstname ,count(c.customernumber) customer_count
+from customers c
+join employees e
+on c.salesrepemployeenumber = e.employeenumber
+group by c.salesrepemployeenumber ,e.firstname ;
+
+-- ---------------------------------------------------------------------------------------------------------------------------------------------------------------------
+-- Payments & Financial Health
+-- ---------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+-- 18. What is the average time gap between order date and payment date?
+
+select avg(datediff(p.paymentdate, o.orderdate)) gap from orders o
+join payments p
+on p.customernumber = o.customernumber;
+
+-- 19. What is the running total of cumulative revenue over time, and at what point did we cross key milestones (e.g., $1M, $5M)?  
+
+select * from (
+select o.orderdate, 
+sum(sum(o2.quantityordered * o2.priceeach)) over (order by o.orderdate) as cumulative_revenue
+from orders o
+join orderdetails o2
+on o.ordernumber = o2.ordernumber
+group by o.orderdate
+)t
+where cumulative_revenue >= 1000000
+   or cumulative_revenue >= 5000000
+order by orderdate;
+
